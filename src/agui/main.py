@@ -33,28 +33,35 @@ from langchain_core.messages import AIMessage, HumanMessage
 # Local research agent components
 from src.agui.langgraph.agent import build_research_graph, ResearchState
 
-# Create FastAPI application
+# INITIALIZATION: Create FastAPI application instance
+# This app will handle HTTP requests and provide the research endpoint
 app = FastAPI(title="AG-UI Endpoint")
 
 @app.post("/")
 async def langgraph_research_endpoint(input_data: RunAgentInput):
     """
     LangGraph-based research processing endpoint with integrated state management.
+    This endpoint receives research requests and streams back real-time results.
     """
     async def event_generator():
         """
         Asynchronous generator that produces a stream of AG-UI protocol events.
+        This function handles the entire research workflow and emits events.
         """
-        # Create an event encoder to properly format SSE events
+        # STEP 1: Initialize the event encoder for Server-Sent Events (SSE) format
+        # This encoder converts our events into the proper SSE format for streaming
         encoder = EventEncoder()
         
-        # Extract the research query from the most recent message
+        # STEP 2: Extract the research query from the incoming request
+        # Get the content of the most recent message (user's query)
         query = input_data.messages[-1].content
-        message_id = str(uuid.uuid4())  # Generate a unique ID for this message
+        # Generate a unique identifier for this specific message/response
+        message_id = str(uuid.uuid4())
         
         print(f"[DEBUG] LangGraph Research started with query: {query}")
 
-        # Signal the start of the agent run
+        # STEP 3: Signal the start of the agent run to the frontend
+        # This event tells the UI that processing has begun
         yield encoder.encode(
             RunStartedEvent(
                 type=EventType.RUN_STARTED,
@@ -63,69 +70,91 @@ async def langgraph_research_endpoint(input_data: RunAgentInput):
             )
         )
 
-        # Create a list to collect emitted events
+        # STEP 4: Set up event collection and callback mechanism
+        # Create a list to store events emitted by the research state
         emitted_events = []
         
         def event_emitter(encoded_event):
-            """Callback function to collect events from the research state."""
+            """
+            Callback function to collect events from the research state.
+            This allows the research agent to emit events during processing.
+            """
             emitted_events.append(encoded_event)
         
-        # Create research state with event emitter
+        # STEP 5: Initialize the research state with event handling capabilities
+        # Create research state object that manages the workflow and emits events
         research_state = ResearchState(
             message_id=message_id,
             query=query,
             event_emitter=event_emitter
         )
         
-        # Emit initial state snapshot
+        # STEP 6: Emit initial state snapshot to the frontend
+        # This provides the UI with the initial state of the research process
         research_state.emit_snapshot()
         
-        # Yield any events that were emitted during initialization
+        # STEP 7: Yield any events that were emitted during initialization
+        # Send any setup events to the frontend before starting main processing
         for event in emitted_events:
             yield event
-        emitted_events.clear()
+        emitted_events.clear()  # Clear the list for next batch of events
         
-        # Build the research graph with state management
+        # STEP 8: Build the LangGraph research workflow
+        # Construct the graph that defines the research agent's behavior
         graph = build_research_graph(research_state)
         
         print(f"[DEBUG] Executing LangGraph workflow with state management")
         
-        # Execute the LangGraph workflow with the query
+        # STEP 9: Execute the main research workflow
+        # Run the LangGraph with the user's query as a HumanMessage
         result = graph.invoke([HumanMessage(content=query)])
         
-        # Yield any events that were emitted during processing
+        # STEP 10: Stream any events emitted during processing
+        # Send real-time updates that occurred during research execution
         for event in emitted_events:
             yield event
-        emitted_events.clear()
+        emitted_events.clear()  # Clear events after streaming
         
+        # STEP 11: Process and validate the research results
+        # Log success and examine the structure of the returned data
         print(f"[DEBUG] LangGraph invoke API succeeded")
         print(f"[DEBUG] LangGraph result type: {type(result)}, content: {str(result)[:100]}...")
         
-        # Get the report from the AI message content
+        # STEP 12: Extract the research report from the result
+        # The result is expected to be a list with the research findings
         print(f"[DEBUG] Result is a list with {len(result)} items")
-        report_item = result[0]
+
+        report_item = result[0]  # Get the first item (should be the AI response)
+        
         print(f"[DEBUG] First item type: {type(report_item)}")
         
+        # STEP 13: Extract the actual report content
+        # Get the text content from the AI message object
         report_content = report_item.content
         print(f"[DEBUG] Report content extracted, length: {len(report_content)}")
         
-        # Send the text message with the report content
+        # STEP 14: Begin streaming the text message to the frontend
+        # Signal the start of a new text message from the assistant
         yield encoder.encode(
             TextMessageStartEvent(
                 type=EventType.TEXT_MESSAGE_START,
                 message_id=message_id,
-                role="assistant"
+                role="assistant"  # Indicates this is the AI's response
             )
         )
         
+        # STEP 15: Stream the actual report content
+        # Send the research findings as the message content
         yield encoder.encode(
             TextMessageContentEvent(
                 type=EventType.TEXT_MESSAGE_CONTENT,
                 message_id=message_id,
-                delta=report_content
+                delta=report_content  # The complete research report
             )
         )
         
+        # STEP 16: Signal the end of the text message
+        # Indicate that the message streaming is complete
         yield encoder.encode(
             TextMessageEndEvent(
                 type=EventType.TEXT_MESSAGE_END,
@@ -133,7 +162,8 @@ async def langgraph_research_endpoint(input_data: RunAgentInput):
             )
         )
 
-        # Complete the run
+        # STEP 17: Signal completion of the entire agent run
+        # Tell the frontend that all processing is finished
         yield encoder.encode(
             RunFinishedEvent(
                 type=EventType.RUN_FINISHED,
@@ -142,18 +172,30 @@ async def langgraph_research_endpoint(input_data: RunAgentInput):
             )
         )
 
-    # Return a streaming response containing SSE events from the generator
+    # STEP 18: Return the streaming response to the client
+    # Create and return a Server-Sent Events (SSE) streaming response
+    # This allows real-time communication with the frontend
     return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream"
+        event_generator(),  # Use our async generator as the content source
+        media_type="text/event-stream"  # Set proper MIME type for SSE
     )
 
 def main():
     """
     Entry point for running the FastAPI server.
+    This function starts the development server with hot reload enabled.
     """
+    # Import uvicorn (ASGI server) for running the FastAPI application
     import uvicorn
+    
+    # Start the server with the following configuration:
+    # - Module path: "src.agui.main:app" (points to our FastAPI app)
+    # - Host: "0.0.0.0" (accept connections from any IP address)
+    # - Port: 8000 (standard development port)
+    # - Reload: True (automatically restart server when code changes)
     uvicorn.run("src.agui.main:app", host="0.0.0.0", port=8000, reload=True)
  
+# ENTRY POINT: Check if this script is being run directly
 if __name__ == "__main__":
+    # If run directly (not imported), start the development server
     main()
