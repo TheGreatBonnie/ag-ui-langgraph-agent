@@ -37,7 +37,7 @@ src/agui/
 1. **Clone the repository:**
 
    ```bash
-   git clone <repository-url>
+   git clone git@github.com:TheGreatBonnie/ag-ui-langgraph-agent.git
    cd ag-ui-langgraph-agent
    ```
 
